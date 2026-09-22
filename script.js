@@ -49,6 +49,33 @@ const clinicState = {
 
 const STORAGE_KEY = 'mediCareClinicEncryptedState';
 
+const consultationGuidance = [
+    {
+        keywords: ['fever', 'bukhar', 'jvara', 'jwaram', 'temperature'],
+        condition: 'Fever or infection symptoms',
+        specialty: 'General Physician',
+        advice: 'A general physician can assess the fever, check for infection, and decide if tests are needed.'
+    },
+    {
+        keywords: ['skin', 'rash', 'acne', 'itch', 'allergy'],
+        condition: 'Skin concern',
+        specialty: 'Dermatologist',
+        advice: 'A dermatologist can examine rashes, itching, acne, and other skin conditions.'
+    },
+    {
+        keywords: ['chest pain', 'heart', 'palpitation', 'blood pressure'],
+        condition: 'Heart or chest concern',
+        specialty: 'Cardiologist',
+        advice: 'A cardiologist can evaluate heart-related symptoms and cardiovascular risk.'
+    },
+    {
+        keywords: ['tooth', 'teeth', 'gum', 'dental'],
+        condition: 'Dental concern',
+        specialty: 'Dentist',
+        advice: 'A dentist can examine tooth pain, gum problems, and other dental symptoms.'
+    }
+];
+
 function getCrypto() {
     const cryptoApi = window.crypto || globalThis.crypto;
     if (!cryptoApi || !cryptoApi.subtle) {
@@ -203,10 +230,85 @@ function showSection(sectionId) {
     if (target) {
         target.classList.add('active');
     }
+
+    if (sectionId === 'assistant') {
+        speakAssistantGuidance();
+    }
 }
 
 function showDashboard() {
     showSection('dashboard');
+}
+
+function findConsultationGuidance(message) {
+    const normalizedMessage = message.toLowerCase();
+    return consultationGuidance.find((item) =>
+        item.keywords.some((keyword) => normalizedMessage.includes(keyword))
+    ) || {
+        condition: 'General health concern',
+        specialty: 'General Physician',
+        advice: 'A general physician is the best first consultation when symptoms are unclear. They can refer you to a specialist if needed.'
+    };
+}
+
+function renderConsultationResult(message) {
+    const result = document.getElementById('consultationResult');
+    if (!result) return;
+
+    const guidance = findConsultationGuidance(message);
+    const doctor = clinicState.doctors.find((item) => item.specialty === guidance.specialty);
+    const doctorText = doctor
+        ? `${doctor.name} is ${doctor.available ? 'available' : 'currently unavailable'}${doctor.available ? ` (${doctor.time})` : ''}.`
+        : 'No matching doctor is currently listed. Please contact the clinic desk.';
+    const button = doctor && doctor.available
+        ? `<button type="button" onclick="bookDoctor('${doctor.name}')">Book with ${doctor.name}</button>`
+        : '';
+
+    result.innerHTML = `
+        <h3>Recommended: ${guidance.specialty}</h3>
+        <p><strong>Possible concern:</strong> ${guidance.condition}</p>
+        <p>${guidance.advice}</p>
+        <p><strong>Clinic availability:</strong> ${doctorText}</p>
+        ${button}
+        <small>This is not a diagnosis. Seek emergency care for severe chest pain, trouble breathing, confusion, or a medical emergency.</small>
+    `;
+}
+
+function startConsultationVoiceInput() {
+    const messageInput = document.getElementById('consultationMessage');
+    const status = document.getElementById('consultationVoiceStatus');
+    const button = document.getElementById('consultationVoiceButton');
+    if (!messageInput) return;
+
+    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+        if (status) status.textContent = 'Voice input is not supported here. Please type your symptoms.';
+        return;
+    }
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'en-US';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    if (button) {
+        button.classList.add('is-listening');
+        button.setAttribute('aria-label', 'Listening. Please speak your symptoms');
+    }
+    if (status) status.textContent = 'Listening...';
+    speakText('Please speak now and tell me your symptoms.', 'en');
+    recognition.start();
+
+    recognition.onresult = (event) => {
+        messageInput.value = event.results[0][0].transcript;
+        renderConsultationResult(messageInput.value);
+        if (status) status.textContent = 'Voice message captured.';
+        if (button) button.classList.remove('is-listening');
+    };
+
+    recognition.onerror = () => {
+        if (status) status.textContent = 'Voice input failed. Please try again or type your symptoms.';
+        if (button) button.classList.remove('is-listening');
+    };
 }
 
 const APPOINTMENT_EXTENSION_HOURS = 5;
@@ -518,6 +620,9 @@ function getAssistantLanguageSettings(language) {
     return settings[language] || settings.en;
 }
 
+const assistantVoiceLanguages = ['en', 'hi', 'te'];
+let assistantVoiceLanguageIndex = -1;
+
 function detectMessageLanguage(messageText) {
     const text = messageText.toLowerCase();
 
@@ -589,8 +694,9 @@ function generateAssistantReply(messageText, language = 'en') {
     const isTokenQuery = /(token|tokan|my token|queue number|number|टोकन|టోకెన్|సంఖ్య)/.test(text);
     const isAppointmentQuery = /(appointment|book|register|schedule|book appointment|register appointment|अपॉइंटमेंट|అపాయింట్‌మెంట్|బుక్|నియోజకం)/.test(text);
     const isQueueQuery = /(queue|waiting|line|check queue|waiting list|how many people|कतार|క్యూ|వేచివుండటం)/.test(text);
+    const hasSymptom = /(fever|bukh|jvara|jwaram|temperature|pain|dard|headache|noppu|dardham|cough|cold|khansi|sardi|khanshi|medicine|prescription|dawai|medicines|dava|rash|skin|tooth|teeth|gum)/.test(text);
 
-    if (isDoctorQuery) return templates[selectedLanguage].doctorAvailability;
+    if (isDoctorQuery && !hasSymptom) return templates[selectedLanguage].doctorAvailability;
     if (isTokenQuery) return templates[selectedLanguage].token;
     if (isAppointmentQuery) return templates[selectedLanguage].appointment;
     if (isQueueQuery) return templates[selectedLanguage].queue;
@@ -620,66 +726,102 @@ function addChatMessage(sender, message) {
     chatMessages.scrollTop = chatMessages.scrollHeight;
 }
 
-function sendVoiceReply() {
-    const patientInput = document.getElementById('patientInput');
-    const assistantLanguage = document.getElementById('assistantLanguage');
-
-    if (!patientInput) return;
-
-    const patientMessage = patientInput.value.trim();
-
-    if (!patientMessage) {
-        alert('Please enter the patient message first.');
-        return;
-    }
-
-    const selectedLanguage = assistantLanguage ? assistantLanguage.value : 'en';
-    const assistantReply = generateAssistantReply(patientMessage, selectedLanguage);
-
-    addChatMessage('Patient', patientMessage);
-    addChatMessage('AI Assistant', assistantReply);
-
-    if ('speechSynthesis' in window) {
-        const utterance = new SpeechSynthesisUtterance(assistantReply);
-        const languageSettings = getAssistantLanguageSettings(selectedLanguage);
-        utterance.lang = languageSettings.speech;
-        utterance.rate = 1;
-        window.speechSynthesis.cancel();
-        window.speechSynthesis.speak(utterance);
-    }
-
-    patientInput.value = '';
-}
-
 function startVoiceInput() {
-    const patientInput = document.getElementById('patientInput');
-    const assistantLanguage = document.getElementById('assistantLanguage');
-    if (!patientInput) return;
+    const status = document.getElementById('assistantVoiceStatus');
+    const button = document.getElementById('voiceInputButton');
 
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-        alert('Voice input is not supported in this browser. Please type the message instead.');
+        speakText('Voice input is not supported in this browser. Please ask the clinic desk for help.');
         return;
     }
 
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
-    const selectedLanguage = assistantLanguage ? assistantLanguage.value : 'en';
+    assistantVoiceLanguageIndex = (assistantVoiceLanguageIndex + 1) % assistantVoiceLanguages.length;
+    const selectedLanguage = assistantVoiceLanguages[assistantVoiceLanguageIndex];
     const languageSettings = getAssistantLanguageSettings(selectedLanguage);
 
     recognition.lang = languageSettings.recognition;
     recognition.interimResults = false;
     recognition.maxAlternatives = 1;
 
-    recognition.start();
+    const prompts = {
+        en: 'How can I help you? Please tell me your health problem.',
+        hi: 'मैं आपकी कैसे सहायता कर सकता हूँ? कृपया अपनी स्वास्थ्य समस्या बताएं।',
+        te: 'నేను మీకు ఎలా సహాయం చేయగలను? దయచేసి మీ ఆరోగ్య సమస్యను చెప్పండి.'
+    };
+    const beginListening = () => {
+        if (button) {
+            button.classList.add('is-listening');
+            button.setAttribute('aria-label', 'Listening. Please speak your health problem');
+        }
+        if (status) status.textContent = 'Listening...';
+        recognition.start();
+    };
+
+    speakText(prompts[selectedLanguage], selectedLanguage, beginListening);
 
     recognition.onresult = function (event) {
         const transcript = event.results[0][0].transcript;
-        patientInput.value = transcript;
+        if (button) button.classList.remove('is-listening');
+        sendVoiceConversation(transcript);
     };
 
     recognition.onerror = function () {
-        alert('Voice input failed. Please try again or type the message manually.');
+        if (button) button.classList.remove('is-listening');
+        if (status) status.textContent = 'Please tap the microphone and try again.';
+        speakText('I could not hear that. Please tap the microphone and try again.');
     };
+}
+
+function speakText(message, language = 'en', onend) {
+    if (!('speechSynthesis' in window)) {
+        if (onend) onend();
+        return;
+    }
+
+    const utterance = new SpeechSynthesisUtterance(message);
+    utterance.lang = getAssistantLanguageSettings(language).speech;
+    utterance.rate = 0.95;
+    utterance.onend = onend;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
+}
+
+function speakAssistantGuidance() {
+    const guidance = [
+        ['How can I help you? Tap the microphone and speak your health problem.', 'en'],
+        ['मैं आपकी कैसे सहायता कर सकता हूँ? माइक्रोफ़ोन दबाकर अपनी स्वास्थ्य समस्या बताएं।', 'hi'],
+        ['నేను మీకు ఎలా సహాయం చేయగలను? మైక్రోఫోన్‌ను నొక్కి మీ ఆరోగ్య సమస్యను చెప్పండి.', 'te']
+    ];
+
+    if (!('speechSynthesis' in window)) return;
+    window.speechSynthesis.cancel();
+    const speakNextLanguage = (index) => {
+        if (index >= guidance.length) return;
+
+        const [message, language] = guidance[index];
+        const utterance = new SpeechSynthesisUtterance(message);
+        utterance.lang = getAssistantLanguageSettings(language).speech;
+        utterance.rate = 0.95;
+        utterance.onend = () => {
+            window.setTimeout(() => speakNextLanguage(index + 1), 900);
+        };
+        window.speechSynthesis.speak(utterance);
+    };
+
+    speakNextLanguage(0);
+}
+
+function sendVoiceConversation(message) {
+    const status = document.getElementById('assistantVoiceStatus');
+    const selectedLanguage = detectMessageLanguage(message);
+    const assistantReply = generateAssistantReply(message, selectedLanguage);
+
+    addChatMessage('Patient', message);
+    addChatMessage('AI Assistant', assistantReply);
+    if (status) status.textContent = 'Message sent. Listen to the reply.';
+    speakText(assistantReply, selectedLanguage);
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -689,9 +831,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     const appointmentForm = document.getElementById('appointmentForm');
     const billingForm = document.getElementById('billingForm');
     const patientSecurityForm = document.getElementById('patientSecurityForm');
-    const sendPatientMessageButton = document.getElementById('sendPatientMessage');
     const voiceInputButton = document.getElementById('voiceInputButton');
-    const voiceReplyButton = document.getElementById('voiceReplyButton');
+    const consultationForm = document.getElementById('consultationForm');
+    const consultationVoiceButton = document.getElementById('consultationVoiceButton');
+
+    if (consultationForm) {
+        consultationForm.addEventListener('submit', (event) => {
+            event.preventDefault();
+            const message = document.getElementById('consultationMessage').value.trim();
+            if (!message) return;
+            renderConsultationResult(message);
+        });
+    }
+
+    if (consultationVoiceButton) {
+        consultationVoiceButton.addEventListener('click', startConsultationVoiceInput);
+    }
 
     if (patientSecurityForm) {
         patientSecurityForm.addEventListener('submit', async function (event) {
@@ -736,31 +891,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
-    if (sendPatientMessageButton) {
-        sendPatientMessageButton.addEventListener('click', () => {
-            const patientInput = document.getElementById('patientInput');
-            const assistantLanguage = document.getElementById('assistantLanguage');
-            if (!patientInput) return;
-
-            const message = patientInput.value.trim();
-            if (!message) {
-                alert('Please type the patient message.');
-                return;
-            }
-
-            const selectedLanguage = assistantLanguage ? assistantLanguage.value : 'en';
-            addChatMessage('Patient', message);
-            addChatMessage('AI Assistant', generateAssistantReply(message, selectedLanguage));
-            patientInput.value = '';
-        });
-    }
-
     if (voiceInputButton) {
         voiceInputButton.addEventListener('click', startVoiceInput);
-    }
-
-    if (voiceReplyButton) {
-        voiceReplyButton.addEventListener('click', sendVoiceReply);
     }
 
     if (patientForm) {

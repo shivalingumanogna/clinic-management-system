@@ -33,6 +33,10 @@
             👤 Patients
         </button>
 
+        <button class="nav-consultation" onclick="showSection('consultation')">
+            🩺 Find a Doctor
+        </button>
+
         <button class="nav-doctors" onclick="showSection('doctors')">
             👨‍⚕️ Doctors
         </button>
@@ -187,6 +191,33 @@
             </form>
 
             <div id="patientList"></div>
+
+        </section>
+
+
+        <!-- Doctor Consultation -->
+        <section id="consultation" class="section">
+
+            <h2>🩺 Find the Right Doctor</h2>
+            <p class="step-note">Describe the disease or symptoms by text or voice. This is guidance only; a doctor will confirm the diagnosis.</p>
+
+            <div class="consultation-layout">
+                <form id="consultationForm" class="consultation-form">
+                    <label for="consultationMessage">What are you experiencing?</label>
+                    <textarea id="consultationMessage" placeholder="For example: I have fever, cough, and body pain." required></textarea>
+
+                    <div class="assistant-buttons">
+                        <button type="submit">Find Doctor</button>
+                        <button type="button" id="consultationVoiceButton" class="voice-button">🎙️ Speak Symptoms</button>
+                    </div>
+                    <p id="consultationVoiceStatus" class="voice-status" aria-live="polite"></p>
+                </form>
+
+                <div id="consultationResult" class="consultation-result" aria-live="polite">
+                    <h3>Recommendation</h3>
+                    <p>Enter your symptoms to see which doctor may be suitable.</p>
+                </div>
+            </div>
 
         </section>
 
@@ -422,11 +453,12 @@
         <section id="assistant" class="section">
 
             <h2>🤖 AI Patient Assistant</h2>
-            <p class="step-note">Chat with the patient and send a voice-style reply.</p>
+            <p class="step-note">Use the microphone. The clinic assistant will listen and reply aloud.</p>
 
             <div class="assistant-box">
 
                 <div class="assistant-header">
+                    
                     <h3>Conversation</h3>
                 </div>
 
@@ -439,28 +471,14 @@
                     </div>
                 </div>
 
-                <label for="assistantLanguage">Language</label>
-                <select id="assistantLanguage">
-                    <option value="en">English</option>
-                    <option value="hi">Hindi</option>
-                    <option value="te">Telugu</option>
-                </select>
-
-                <textarea id="patientInput" placeholder="Type the patient's message here..." required></textarea>
-
                 <div class="assistant-buttons">
-                    <button type="button" id="sendPatientMessage">
-                        Send Text Message
-                    </button>
-
                     <button type="button" id="voiceInputButton" class="voice-button">
-                        Record Voice Message
-                    </button>
-
-                    <button type="button" id="voiceReplyButton" class="voice-button">
-                        Send Voice Reply
+                        <span aria-hidden="true">🎙️</span>
+                        <span class="sr-only">Tap to speak with the clinic assistant</span>
                     </button>
                 </div>
+
+                <p id="assistantVoiceStatus" class="voice-status" aria-live="polite"></p>
 
             </div>
 
